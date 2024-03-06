@@ -3,9 +3,6 @@ Rails.application.routes.draw do
     root 'feeds#index'
     resources :feeds do
       scope defaults: { format: :json } do
-        collection do
-          post :read
-        end
       end
     end
   end

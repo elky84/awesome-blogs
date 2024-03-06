@@ -7,12 +7,14 @@ class FeedsController < ApplicationController
 
     recent_days = 10.days
 
+    feeds = Rails.application.config_for(:feeds)
+
     if group == 'all'
-      feeds = Rails.configuration.feeds.inject([]) do |array, e|
+      feeds = feeds.inject([]) do |array, e|
         array + e.second
       end
     else
-      feeds = Rails.configuration.feeds[group]
+      feeds = feeds[group]
 
       if group == 'dev'
         recent_days = 7.days
@@ -37,14 +39,18 @@ class FeedsController < ApplicationController
             Timeout::timeout(3) {
               xml = HTTParty.get(feed_url).body
               Feedjira.parse(xml)
-              #Feedjira::Feed.fetch_and_parse(feed_url)
             }
           end
 
           next if feed.nil?
 
+          if Rails.env.development?
+            if feed.entries.sort_by(&:published).last.published < 5.years.ago
+              puts "5년이 지난 피드를 출력합니다. #{feed.title} #{feed_url}"
+            end
+          end
+
           feed.entries.each do |entry|
-            # Rails.logger.debug "ENTRY: #{entry.inspect}"
             if entry.published < now - recent_days || entry.published.localtime > Time.now
               next
             end
@@ -70,8 +76,9 @@ class FeedsController < ApplicationController
 
               item.title = entry.title || '제목 없음'
               item.updated = entry.published.localtime
-              item.summary = entry.content || entry.summary
-              item.summary = replace_relative_image_url(item.summary, item.link)
+              item.content.type = 'html'
+              item.content.content = replace_relative_image_url(entry.content, item.link)
+              item.summary = entry.summary
               item.author = entry.author || feed_h[:author_name] || feed.title
             end
           end
@@ -84,7 +91,15 @@ class FeedsController < ApplicationController
     end
 
     respond_to do |format|
-      format.xml { render xml: @rss.to_xml }
+      format.xml {
+        doc = Nokogiri::XML(@rss.to_xml)
+
+        doc.xpath('//xmlns:summary').each do |summary|
+          summary.set_attribute('type', 'html')
+        end
+
+        render xml: doc.to_xml
+      }
       format.json
     end
   end
